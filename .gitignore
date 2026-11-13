@@ -1,0 +1,13 @@
+bin/
+obj/
+node_modules/
+dist/
+src/Server/wwwroot/
+data/
+TestResults/
+test-results/
+playwright-report/
+*.user
+.env
+*.binlog
+.packages/

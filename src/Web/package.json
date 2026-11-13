@@ -1,0 +1,21 @@
+{
+  "name": "mingo-git-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "generate": "openapi-typescript ../../specs/openapi.json -o src/api/schema.ts",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "codemirror": "^6.0.2",
+    "openapi-fetch": "^0.17.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8"
+  }
+}

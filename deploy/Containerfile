@@ -1,0 +1,24 @@
+FROM docker.io/library/node:24-bookworm-slim AS web
+WORKDIR /build/src/Web
+COPY src/Web/package*.json ./
+RUN npm ci
+COPY src/Web/ ./
+RUN npm run build
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /build
+COPY src/Server/MinGo.GitServer.csproj src/Server/
+RUN dotnet restore src/Server/MinGo.GitServer.csproj
+COPY src/Server/ src/Server/
+COPY --from=web /build/src/Server/wwwroot/ src/Server/wwwroot/
+RUN dotnet publish src/Server/MinGo.GitServer.csproj --no-restore -c Release -o /out
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && install -d -o app -g app -m 0700 /data
+WORKDIR /app
+COPY --from=build /out/ ./
+ENV Forge__DataPath=/data
+USER app
+ENTRYPOINT ["dotnet", "MinGo.GitServer.dll"]

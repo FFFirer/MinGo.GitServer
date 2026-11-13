@@ -1,0 +1,10 @@
+**/bin
+**/obj
+**/node_modules
+src/Server/wwwroot
+src/Web/test-results
+src/Web/playwright-report
+.git
+data
+.env
+*.binlog

@@ -38,6 +38,12 @@ Pop-Location
 
 ## Rootless Podman
 
+GitHub Actions 在 PR 中验证镜像构建。推送到默认分支（`main` 或 `master`）时发布 `latest`，推送 `v1.0.0` 一类的版本标签时发布同名镜像标签。每次发布还带有 `sha-<完整提交 SHA>`。镜像地址为 `ghcr.io/<owner>/<repo>`，路径统一小写。工作流使用仓库的 `GITHUB_TOKEN`。拉取私有镜像时需先登录 GHCR。
+
+```sh
+podman pull ghcr.io/<owner>/<repo>:latest
+```
+
 准备受 Git 客户端信任的 PFX 证书，并确保容器内应用用户可以读取证书。设置环境变量 `MINGO_TLS_PFX` 为证书绝对路径，`MINGO_TLS_PASSWORD` 为证书密码，首次启动时设置 `MINGO_ADMIN_PASSWORD`。默认发布到 `127.0.0.1:8443`，远端访问时设置 `MINGO_BIND_ADDRESS` 为计划监听的宿主地址。
 
 ```sh

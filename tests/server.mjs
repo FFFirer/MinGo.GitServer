@@ -18,7 +18,8 @@ export async function start(data, port = 5087, { env = {} } = {}) {
     cwd: project,
     env: { ...process.env, ASPNETCORE_ENVIRONMENT: "Development", DOTNET_ENVIRONMENT: "Development",
       Logging__LogLevel__Microsoft: "Warning", "Logging__LogLevel__Microsoft.Hosting.Lifetime": "Information",
-      ASPNETCORE_URLS: url, Forge__DataPath: data, Forge__AdminPassword: password, ...env },
+      ASPNETCORE_URLS: url, Vite__Server__AutoRun: "false",
+      Forge__DataPath: data, Forge__AdminUser: "admin", Forge__AdminPassword: password, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let logs = "";

@@ -5,13 +5,21 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.OpenApi;
+using Vite.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
+var useVite = builder.Environment.IsDevelopment() &&
+    builder.Configuration.GetValue("Vite:Server:AutoRun", false);
+if (useVite)
+    builder.Services.AddViteServices();
 builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole();
+builder.Services.AddHealthChecks();
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 7 * 1024 * 1024);
 builder.Services.AddSingleton<ForgeStore>();
 builder.Services.AddSingleton<RepositoryLocks>();
@@ -144,13 +152,35 @@ app.Use(async (http, next) =>
         await Results.Problem(detail: message, statusCode: status).ExecuteAsync(http);
     }
 });
-app.UseDefaultFiles();
-app.UseStaticFiles();
+if (useVite)
+{
+    app.UseWebSockets();
+    app.UseWhen(http =>
+        http.GetEndpoint() is null &&
+        !http.Request.Path.StartsWithSegments("/api") &&
+        !http.Request.Path.StartsWithSegments("/git") &&
+        !http.Request.Path.StartsWithSegments("/health") &&
+        !http.Request.Path.StartsWithSegments("/openapi"),
+        frontend => frontend.UseViteDevelopmentServer(true));
+}
+else
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+}
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/health", () => TypedResults.Ok(new { status = "ok" }));
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = (http, report) => http.Response.WriteAsJsonAsync(new
+    {
+        status = report.Status == HealthStatus.Healthy
+            ? "ok"
+            : report.Status.ToString().ToLowerInvariant()
+    }, http.RequestAborted)
+}).WithMetadata(new HttpMethodMetadata([HttpMethods.Get]));
 var openApi = app.MapOpenApi();
 if (!app.Environment.IsDevelopment())
     openApi.RequireAuthorization();

@@ -8,22 +8,20 @@
 
 ```powershell
 npm.cmd --prefix src/Web ci
-npm.cmd --prefix src/Web run build
-dotnet build MinGo.GitServer.slnx
-$env:ASPNETCORE_ENVIRONMENT = 'Development'
-$env:Forge__AdminPassword = '<至少 12 个字符的管理员密码>'
-Push-Location src/Server
-dotnet bin/Debug/net10.0/MinGo.GitServer.dll --urls http://127.0.0.1:5080
-Pop-Location
+dotnet user-secrets set "Forge:AdminPassword" "<至少 12 个字符的管理员密码>" --project src/Server
+dotnet run --project src/Server
 ```
 
-打开 `http://127.0.0.1:5080`，默认用户为 `admin`。首次启动把密码哈希写入 SQLite。重新启动时可移除初始化密码。开发前端时运行 `npm.cmd --prefix src/Web run dev`，Vite 将请求代理到 5080。
+打开 `http://127.0.0.1:5080`，默认用户为 `admin`。启动配置使用 `Development`。首次访问网页时，Vite.AspNetCore 自动从 `src/Web` 启动 Vite（内部端口 5173），并通过 5080 提供网页和热更新。API、Git 和健康检查仍由 ASP.NET Core 处理。
+
+User Secrets 存在本机用户目录。开发环境中，同名配置按命令行参数、环境变量、User Secrets、环境专用 JSON、通用 JSON 的顺序取值。使用 PowerShell 环境变量时，在启动应用的同一终端设置 `$env:Forge__AdminPassword = '<密码>'`，双下划线对应配置键中的冒号。首次启动把密码哈希写入 SQLite，之后可移除初始化密码。已有数据目录的管理员密码由 SQLite 决定。
 
 在网页创建仓库并生成 Git 令牌。复制克隆地址，Git 提示凭据时使用管理员用户名和该令牌。新令牌立即吊销旧令牌，有效期 90 天。网页提交后使用 `git pull --ff-only` 拉取更新。
 
 ## 验证与生成客户端
 
 ```powershell
+dotnet build MinGo.GitServer.slnx
 node tests/protocol.mjs
 node tests/protocol.mjs --generate-openapi
 npm.cmd --prefix src/Web run generate
@@ -34,9 +32,33 @@ npm.cmd run test:e2e
 Pop-Location
 ```
 
-协议测试启动独立的临时应用，覆盖真实 Git 传输、API、并发提交和离线恢复。浏览器测试使用独立临时数据并要求提前构建前后端。OpenAPI 开发地址为 `/openapi/v1.json`，生产环境需要登录。
+协议测试启动独立的临时应用，覆盖真实 Git 传输、API、并发提交和离线恢复。浏览器测试使用独立临时数据和预构建的静态前端，因此需要提前构建前后端。OpenAPI 开发地址为 `/openapi/v1.json`，生产环境需要登录。
 
 反代浏览器测试还需要 `openssl`（用于生成临时 HTTPS 证书），并使用本机回环端口 5089–5091。可通过 `MINGO_TEST_CONFIGURATION=Release` 选择 Release 构建，通过 `MINGO_TEST_BROWSER_CHANNEL=msedge` 使用已安装的 Microsoft Edge。
+
+## Release 构建
+
+先运行 `npm.cmd --prefix src/Web ci` 和 `npm.cmd --prefix src/Web run build`，再运行 `dotnet publish src/Server/MinGo.GitServer.csproj -c Release -o <发布目录>`。Vite 将前端产物写入 `src/Server/wwwroot`，发布时一起打包，由 ASP.NET Core 提供静态文件。容器构建在镜像内完成这些步骤，生产运行使用部署环境变量。
+
+## Docker Compose
+
+根目录的 `docker-compose.yaml` 使用已发布的 GHCR 镜像。准备浏览器和 Git 客户端信任的 PFX 证书，并确保容器内的 `app` 用户可读取该文件。在仓库根目录创建 `.env`，替换以下示例值。
+
+```dotenv
+MINGO_TLS_PFX=./certs/forge.pfx
+MINGO_TLS_PASSWORD='替换为 PFX 密码'
+MINGO_ADMIN_PASSWORD='替换为至少 12 个字符的管理员密码'
+```
+
+私有镜像需先用有包读取权限的账号执行 `docker login ghcr.io`。
+
+```sh
+docker compose pull
+docker compose up -d
+docker compose ps
+```
+
+使用证书对应的主机名访问 HTTPS 端口 8443，默认用户是 `admin`。默认只监听宿主机回环地址，可用 `MINGO_BIND_ADDRESS` 和 `MINGO_HTTPS_PORT` 调整。使用 `MINGO_IMAGE_TAG` 可固定版本。SQLite 和 Git 仓库保存在 `forge-data` 卷。首次启动成功后，可从 `.env` 移除管理员初始化密码并重新执行 `docker compose up -d`。
 
 ## Rootless Podman
 

@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "MinGo.GitServer": {
+      "commandName": "Project",
+      "applicationUrl": "http://127.0.0.1:5080",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

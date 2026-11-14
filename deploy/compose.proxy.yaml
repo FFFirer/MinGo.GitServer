@@ -1,0 +1,42 @@
+services:
+  forge:
+    build:
+      context: ..
+      dockerfile: deploy/Containerfile
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Forge__AdminUser: ${MINGO_ADMIN_USER:-admin}
+      Forge__AdminPassword: ${MINGO_ADMIN_PASSWORD:-}
+      Forge__TrustedProxy: 172.30.240.2
+      Forge__ForwardedAllowedHosts__0: git.example.com
+      Forge__ForwardedAllowedHosts__1: git.internal.example.com
+    volumes:
+      - forge-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    networks:
+      - forge-proxy
+  proxy:
+    image: docker.io/library/nginx:stable-alpine
+    ports:
+      - "443:443"
+      - "8443:8443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${MINGO_PROXY_CERT_DIR:?set MINGO_PROXY_CERT_DIR}:/etc/nginx/tls:ro
+    networks:
+      forge-proxy:
+        ipv4_address: 172.30.240.2
+    depends_on:
+      forge:
+        condition: service_healthy
+networks:
+  forge-proxy:
+    ipam:
+      config:
+        - subnet: 172.30.240.0/24
+volumes:
+  forge-data:

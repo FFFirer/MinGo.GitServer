@@ -36,6 +36,8 @@ Pop-Location
 
 协议测试启动独立的临时应用，覆盖真实 Git 传输、API、并发提交和离线恢复。浏览器测试使用独立临时数据并要求提前构建前后端。OpenAPI 开发地址为 `/openapi/v1.json`，生产环境需要登录。
 
+反代浏览器测试还需要 `openssl`（用于生成临时 HTTPS 证书），并使用本机回环端口 5089–5091。可通过 `MINGO_TEST_CONFIGURATION=Release` 选择 Release 构建，通过 `MINGO_TEST_BROWSER_CHANNEL=msedge` 使用已安装的 Microsoft Edge。
+
 ## Rootless Podman
 
 GitHub Actions 在 PR 中验证镜像构建。推送到默认分支（`main` 或 `master`）时发布 `latest`，推送 `v1.0.0` 一类的版本标签时发布同名镜像标签。每次发布还带有 `sha-<完整提交 SHA>`。镜像地址为 `ghcr.io/<owner>/<repo>`，路径统一小写。工作流使用仓库的 `GITHUB_TOKEN`。拉取私有镜像时需先登录 GHCR。
@@ -51,7 +53,17 @@ podman compose -f deploy/compose.yaml up --build -d
 podman compose -f deploy/compose.yaml ps
 ```
 
-生产环境要求 HTTPS。若使用已有 HTTPS 反向代理，配置 `Forge__TrustedProxy` 为应用实际看到的代理 IP，并让代理覆写 `X-Forwarded-Proto` 和 `X-Forwarded-For`。代理需允许 Git 流式请求和 256 MiB 请求体。
+## HTTPS 反向代理
+
+`deploy/compose.proxy.yaml` 在 Nginx 终止 HTTPS，并通过专用容器网络将站点根路径 `/` 的 Web、API 和 Git 请求转给应用的 HTTP 端口。只有 Nginx 的端口发布到宿主机。将 `deploy/nginx.conf` 和 Compose 中的示例域名替换为实际域名，并准备覆盖这些域名的证书。设置 `MINGO_PROXY_CERT_DIR` 为包含 `fullchain.pem` 和 `privkey.pem` 的目录路径，首次启动时设置 `MINGO_ADMIN_PASSWORD`。
+
+```sh
+docker compose -f deploy/compose.proxy.yaml up --build -d
+```
+
+使用 `https://git.example.com/` 或 `https://git.internal.example.com:8443/` 打开页面时，复制的 Git 克隆地址会使用对应的访问 Host 和端口。示例使用 `172.30.240.2` 作为代理固定地址。如果网段冲突，须同步调整 Compose 的代理地址、子网和 `Forge__TrustedProxy`。
+
+使用已有代理时，配置 `Forge__TrustedProxy` 为应用实际看到的直接代理 IP，并在代理校验外部 Host 后覆写 `X-Forwarded-Proto` 和 `X-Forwarded-For`。代理可以保留原始 `Host`，或覆写 `X-Forwarded-Host` 为校验过的完整外部 Host（包括非默认端口）。保留原始 `Host` 时应清除客户端提供的 `X-Forwarded-Host`。应用仅处理受信代理提供的一跳转发头。可用 `Forge__ForwardedAllowedHosts__0`、`Forge__ForwardedAllowedHosts__1` 等限制转发域名，值仅填写域名。代理需允许 Git 流式请求和 256 MiB 请求体。
 
 ## 备份与恢复
 

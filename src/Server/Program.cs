@@ -82,11 +82,17 @@ if (builder.Configuration["Forge:TrustedProxy"] is { } proxy)
 {
     builder.Services.Configure<ForwardedHeadersOptions>(options =>
     {
-        options.ForwardedHeaders = ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedFor;
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedFor |
+            ForwardedHeaders.XForwardedHost;
         options.KnownIPNetworks.Clear();
         options.KnownProxies.Clear();
         options.KnownProxies.Add(IPAddress.Parse(proxy));
         options.ForwardLimit = 1;
+        foreach (var host in builder.Configuration.GetSection("Forge:ForwardedAllowedHosts").GetChildren())
+        {
+            if (host.Value is { Length: > 0 } value)
+                options.AllowedHosts.Add(value);
+        }
     });
 }
 

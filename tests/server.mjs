@@ -11,13 +11,14 @@ export const password = "local-test-password";
 export const temp = prefix => mkdtemp(join(tmpdir(), prefix));
 export const clean = path => rm(path, { recursive: true, force: true });
 
-export async function start(data, port = 5087) {
+export async function start(data, port = 5087, { env = {} } = {}) {
   const url = `http://127.0.0.1:${port}`;
-  const child = spawn("dotnet", [join(project, "bin", "Debug", "net10.0", "MinGo.GitServer.dll")], {
+  const configuration = process.env.MINGO_TEST_CONFIGURATION ?? "Debug";
+  const child = spawn("dotnet", [join(project, "bin", configuration, "net10.0", "MinGo.GitServer.dll")], {
     cwd: project,
     env: { ...process.env, ASPNETCORE_ENVIRONMENT: "Development", DOTNET_ENVIRONMENT: "Development",
       Logging__LogLevel__Microsoft: "Warning", "Logging__LogLevel__Microsoft.Hosting.Lifetime": "Information",
-      ASPNETCORE_URLS: url, Forge__DataPath: data, Forge__AdminPassword: password },
+      ASPNETCORE_URLS: url, Forge__DataPath: data, Forge__AdminPassword: password, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let logs = "";

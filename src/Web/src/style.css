@@ -151,6 +151,7 @@ dialog form, .fields { display: grid; gap: .85rem; }
 .name-rules [data-valid="true"] { color: var(--green); }
 .name-rules [data-valid="false"] { color: var(--red); }
 .actions { display: flex; justify-content: end; gap: .5rem; }
+.file-actions { margin-inline-start: auto; flex-wrap: wrap; }
 .editor { border: 1px solid var(--line); min-width: 0; }
 .cm-editor { min-height: 12rem; max-height: 47dvh; }
 .cm-scroller { overflow: auto; }

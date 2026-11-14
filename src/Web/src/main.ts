@@ -331,8 +331,10 @@ class Forge extends HTMLElement {
         element("strong", path, "mono"));
       const mode = this.tree?.entries.find(entry => entry.name === path.split("/").at(-1))?.mode;
       if (!this.tag && (mode === "100644" || mode === "100755")) {
-        if (blob.content != null) bar.append(this.button("编辑文件", () => this.editFile(), "primary"));
-        bar.append(this.button("删除文件", () => this.editFile(true), "danger"));
+        const actions = element("div", "", "actions file-actions");
+        if (blob.content != null) actions.append(this.button("编辑文件", () => this.editFile(), "primary"));
+        actions.append(this.button("删除文件", () => this.editFile(true), "danger"));
+        bar.append(actions);
       }
       viewer.append(bar, element("pre", blob.content ?? "此文件无法作为 UTF-8 文本预览"));
     } else {

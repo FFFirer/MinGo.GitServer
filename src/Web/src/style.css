@@ -139,6 +139,17 @@ dialog {
 dialog::backdrop { background: #112719a0; }
 dialog.full { width: min(62rem, calc(100% - 1.5rem)); }
 dialog form, .fields { display: grid; gap: .85rem; }
+.name-rules {
+  display: grid;
+  gap: .25rem;
+  margin: .4rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: .875rem;
+}
+.name-rules [data-valid="true"] { color: var(--green); }
+.name-rules [data-valid="false"] { color: var(--red); }
 .actions { display: flex; justify-content: end; gap: .5rem; }
 .editor { border: 1px solid var(--line); min-width: 0; }
 .cm-editor { min-height: 12rem; max-height: 47dvh; }

@@ -13,7 +13,18 @@ test("375px 下创建仓库、提交文件、浏览历史并管理引用", async
     await page.getByLabel("密码", { exact: true }).fill(password);
     await page.getByRole("button", { name: "登录", exact: true }).click();
     await page.getByRole("button", { name: "新建仓库" }).click();
-    await page.getByLabel("仓库名称").fill("mobile-demo");
+    const name = page.getByLabel("仓库名称");
+    const rules = page.locator("#repository-name-rules").getByRole("listitem");
+    await name.fill("MinGo.GitServerTests");
+    await expect(rules).toHaveText([
+      "✓ 通过 · 长度为 1–63 个字符",
+      "✕ 未通过 · 以小写英文字母或数字开头",
+      "✕ 未通过 · 仅含小写英文字母、数字、下划线或连字符",
+    ]);
+    await page.getByRole("button", { name: "创建", exact: true }).click();
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+    await name.fill("mobile-demo");
+    await expect(name).toHaveAttribute("aria-invalid", "false");
     await page.getByRole("button", { name: "创建", exact: true }).click();
     await expect(page.getByRole("heading", { name: "mobile-demo" })).toBeVisible();
     await page.getByRole("button", { name: "新建文件" }).click();

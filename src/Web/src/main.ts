@@ -380,6 +380,29 @@ class Forge extends HTMLElement {
   private createRepo() {
     const name = input("仓库名称");
     name.field.pattern = "[a-z0-9][a-z0-9_\\-]{0,62}";
+    name.field.spellcheck = false;
+    const nameRules = element("ul", "", "name-rules");
+    nameRules.id = "repository-name-rules";
+    nameRules.setAttribute("aria-live", "polite");
+    name.field.setAttribute("aria-describedby", nameRules.id);
+    const rules = [
+      { label: "长度为 1–63 个字符", test: (value: string) => value.length >= 1 && value.length <= 63 },
+      { label: "以小写英文字母或数字开头", test: (value: string) => /^[a-z0-9]/.test(value) },
+      { label: "仅含小写英文字母、数字、下划线或连字符", test: (value: string) => !/[^a-z0-9_-]/.test(value) },
+    ].map(rule => ({ ...rule, row: element("li", rule.label) }));
+    nameRules.append(...rules.map(rule => rule.row));
+    const updateNameRules = () => {
+      const value = name.field.value;
+      name.field.setAttribute("aria-invalid", String(!name.field.validity.valid));
+      for (const { label, test, row } of rules) {
+        const valid = test(value);
+        if (row.dataset.valid === String(valid)) continue;
+        row.dataset.valid = String(valid);
+        row.textContent = `${valid ? "✓ 通过" : "✕ 未通过"} · ${label}`;
+      }
+    };
+    name.field.addEventListener("input", updateNameRules);
+    name.field.addEventListener("invalid", updateNameRules);
     const branch = input("默认分支", "text", "main");
     const modal = this.modal("新建仓库", "创建", async () => {
       const repo = await result(api.POST("/api/v1/repos", { body: { name: name.field.value, defaultBranch: branch.field.value } }));
@@ -388,7 +411,9 @@ class Forge extends HTMLElement {
       modal.dialog.close();
       await this.open(repo);
     });
-    modal.body.append(name.wrapper, branch.wrapper);
+    const nameGroup = element("div");
+    nameGroup.append(name.wrapper, nameRules);
+    modal.body.append(nameGroup, branch.wrapper);
     modal.dialog.showModal();
   }
 

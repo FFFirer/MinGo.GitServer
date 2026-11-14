@@ -243,10 +243,37 @@ class Forge extends HTMLElement {
     title.append(this.button("所有仓库", () => this.home(), "quiet"), element("h1", repo.name));
     header.append(title, this.button("删除仓库", () => this.removeRepo(), "danger"));
     const clone = element("div", "", "clone");
-    const url = element("code", new URL(repo.clonePath, location.origin).href);
+    const address = new URL(repo.clonePath, location.origin).href;
+    const url = element("code", address);
     clone.append(url, this.button("复制地址", () => this.run(async () => {
-      await navigator.clipboard.writeText(url.textContent!);
-      this.notice.textContent = "已复制 Git 地址";
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(address);
+          this.notice.textContent = "已复制 Git 地址";
+          return;
+        } catch {
+          // Try copying the selected address if the clipboard API is blocked.
+        }
+      }
+
+      const selection = window.getSelection();
+      if (selection) {
+        const range = document.createRange();
+        range.selectNodeContents(url);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        try {
+          // The clipboard API is unavailable on ordinary HTTP pages.
+          if (document.execCommand("copy")) {
+            selection.removeAllRanges();
+            this.notice.textContent = "已复制 Git 地址";
+            return;
+          }
+        } catch {
+          // Keep the address selected for manual copying.
+        }
+      }
+      this.notice.textContent = "无法自动复制，请手动复制 Git 地址";
     })));
     const nav = element("nav", "", "tabs");
     nav.setAttribute("aria-label", "仓库功能");

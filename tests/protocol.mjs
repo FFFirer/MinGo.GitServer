@@ -90,6 +90,41 @@ try {
     assert.deepEqual(await readFile(join(reader, "pack.bin")), pack);
     await request(base + "/blob?path=pack.bin", "GET", undefined, 413);
     const gitHead = (await git(writer, "rev-parse", "HEAD")).stdout.trim();
+    const imported = await request("/api/v1/repos", "POST", { name: "imported" }, 201);
+    const importedRemote = server.url + imported.clonePath;
+    const importedApi = "/api/v1/repos/" + imported.id;
+    assert.equal(imported.isInitialized, false);
+    await git(writer, "push", importedRemote, "HEAD:refs/tags/before-import");
+    assert.equal((await request(importedApi)).isInitialized, false);
+    await git(writer, "push", importedRemote, "HEAD:refs/heads/master");
+    const importedInfo = await request(importedApi);
+    assert.equal(importedInfo.isInitialized, true);
+    assert.equal(importedInfo.defaultBranch, "master");
+    assert.equal((await request(importedApi + "/tree")).head, gitHead);
+    await git(directory, "clone", importedRemote, "imported");
+    assert.equal((await git(join(directory, "imported"), "branch", "--show-current")).stdout.trim(), "master");
+    await git(writer, "push", importedRemote, "HEAD:refs/heads/main");
+    assert.equal((await request(importedApi)).defaultBranch, "master");
+
+    const initialized = await request("/api/v1/repos", "POST",
+      { name: "initialized", defaultBranch: "develop", initialize: true }, 201);
+    assert.equal(initialized.isInitialized, true);
+    await git(directory, "clone", server.url + initialized.clonePath, "initialized");
+    assert.equal(await readFile(join(directory, "initialized", "README.md"), "utf8"), "# initialized\n");
+    assert.equal((await git(join(directory, "initialized"), "branch", "--show-current")).stdout.trim(), "develop");
+
+    const multiple = await request("/api/v1/repos", "POST", { name: "multiple", defaultBranch: "zeta" }, 201);
+    const multipleRemote = server.url + multiple.clonePath;
+    await assert.rejects(git(writer, "push", multipleRemote, "missing:refs/heads/missing"));
+    assert.equal((await request("/api/v1/repos/" + multiple.id)).isInitialized, false);
+    await git(writer, "push", multipleRemote, "HEAD:refs/heads/alpha", "HEAD:refs/heads/zeta");
+    assert.equal((await request("/api/v1/repos/" + multiple.id)).defaultBranch, "zeta");
+
+    const webFirst = await request("/api/v1/repos", "POST", { name: "web-first" }, 201);
+    const webFirstApi = "/api/v1/repos/" + webFirst.id;
+    await request(webFirstApi + "/files", "PUT",
+      { branch: "main", path: "hello.txt", expectedHead: null, content: "hello", message: "First file" });
+    assert.equal((await request(webFirstApi)).isInitialized, true);
     assert.equal((await request(base + "/tree?path=" + encodeURIComponent("目录"))).entries[0].name, "notes.txt");
     await request(base + "/blob?path=../forge.db", "GET", undefined, 422);
     const change = { branch: "main", path: "目录/notes.txt", expectedHead: gitHead, content: "from web\n", message: "Web edit" };
@@ -141,15 +176,32 @@ try {
     await request("/api/v1/repos/" + empty.id, "DELETE", undefined, 204);
     assert.ok((await readdir(join(data, "trash"))).includes(empty.id + ".git"));
 
+    const concurrent = await request("/api/v1/repos", "POST", { name: "concurrent" }, 201);
+    const concurrentRemote = server.url + concurrent.clonePath;
+    await Promise.all(["one", "two"].map(branch => git(writer, "push", concurrentRemote, "HEAD:refs/heads/" + branch)));
+    const concurrentInfo = await request("/api/v1/repos/" + concurrent.id);
+    assert.ok(["one", "two"].includes(concurrentInfo.defaultBranch));
+    assert.match((await git(writer, "ls-remote", "--symref", concurrentRemote, "HEAD")).stdout,
+      new RegExp("ref: refs/heads/" + concurrentInfo.defaultBranch + "\\s+HEAD"));
+
+    const interrupted = await request("/api/v1/repos", "POST", { name: "interrupted" }, 201);
     await server.stop();
     server = undefined;
+    // Write the branch directly to simulate a process exit before metadata synchronization.
+    await git(writer, "push", join(data, "repos", interrupted.id + ".git"), "HEAD:refs/heads/recovered");
     const restored = join(directory, "restored");
     await cp(data, restored, { recursive: true });
     server = await start(restored);
     cookies = new Map();
     csrf = "";
     await login();
-    assert.deepEqual((await request("/api/v1/repos")).map(r => r.name), ["protocol"]);
+    const restoredRepos = await request("/api/v1/repos");
+    assert.deepEqual(restoredRepos.map(r => r.name),
+      ["concurrent", "imported", "initialized", "interrupted", "multiple", "protocol", "web-first"]);
+    const recovered = restoredRepos.find(r => r.id === interrupted.id);
+    assert.equal(recovered.defaultBranch, "recovered");
+    assert.equal(recovered.isInitialized, true);
+    assert.equal((await request("/api/v1/repos/" + interrupted.id + "/tree")).head, gitHead);
     await git(directory, "clone", server.url + repo.clonePath, "restored-reader");
     console.log("PASS: private clone/push/fetch/pull, 8 MiB pack, refs, history, path validation, CAS, deletion and offline restore.");
   }

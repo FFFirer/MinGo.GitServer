@@ -104,6 +104,7 @@ class Forge extends HTMLElement {
   }
 
   private async open(repo: Repo) {
+    repo = await result(api.GET("/api/v1/repos/{id}", { params: { path: { id: repo.id } } }));
     const tree = await result(api.GET("/api/v1/repos/{id}/tree", { params: { path: { id: repo.id } } }));
     this.repo = repo;
     this.branch = repo.defaultBranch;
@@ -295,6 +296,17 @@ class Forge extends HTMLElement {
   }
 
   private renderFiles(main: HTMLElement) {
+    if (!this.repo!.isInitialized && !this.tag && !this.tree?.head) {
+      const panel = element("section", "", "panel directory");
+      const title = element("div", "", "bar");
+      title.append(element("strong", "等待首次推送"),
+        this.button("新建文件", () => this.editFile(false, null), "primary"));
+      const address = new URL(this.repo!.clonePath, location.origin).href;
+      panel.append(title, element("p", "在已有的本地仓库中运行以下命令，推送当前分支。", "empty"),
+        element("pre", `git remote add origin ${address}\ngit push -u origin HEAD`, "empty mono"));
+      main.append(panel);
+      return;
+    }
     const layout = element("div", "", `files ${this.file ? "with-file" : ""}`);
     const sidebar = element("section", "", "panel directory");
     const title = element("div", "", "bar");
@@ -433,8 +445,12 @@ class Forge extends HTMLElement {
     name.field.addEventListener("input", updateNameRules);
     name.field.addEventListener("invalid", updateNameRules);
     const branch = input("默认分支", "text", "main");
+    const initialize = input("用 README 初始化", "checkbox", "", false);
+    initialize.wrapper.classList.add("checkbox");
     const modal = this.modal("新建仓库", "创建", async () => {
-      const repo = await result(api.POST("/api/v1/repos", { body: { name: name.field.value, defaultBranch: branch.field.value } }));
+      const repo = await result(api.POST("/api/v1/repos", { body: {
+        name: name.field.value, defaultBranch: branch.field.value, initialize: initialize.field.checked,
+      } }));
       this.repos.push(repo);
       this.repos.sort((a, b) => a.name.localeCompare(b.name));
       modal.dialog.close();
@@ -442,7 +458,7 @@ class Forge extends HTMLElement {
     });
     const nameGroup = element("div");
     nameGroup.append(name.wrapper, nameRules);
-    modal.body.append(nameGroup, branch.wrapper);
+    modal.body.append(nameGroup, branch.wrapper, initialize.wrapper);
     modal.dialog.showModal();
   }
 

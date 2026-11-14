@@ -4,7 +4,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Http.Features;
 
-sealed class GitTransport(ForgeStore store, GitProcess git, RepositoryLocks locks)
+sealed class GitTransport(ForgeStore store, GitProcess git, RepositoryLocks locks, GitRepository repositories)
 {
     public async Task Handle(HttpContext http, string owner, string name, string endpoint)
     {
@@ -32,8 +32,8 @@ sealed class GitTransport(ForgeStore store, GitProcess git, RepositoryLocks lock
             return;
         }
         using var lease = locks.Read(repo.Id);
-        if (store.Find(repo.Id) is null)
-            throw new ForgeException(404, "Repository does not exist.");
+        using var initialization = await locks.Initialize(repo, http.RequestAborted);
+        repo = await repositories.CompleteInitialization(repositories.Get(repo.Id), http.RequestAborted);
 
         const long requestLimit = 256L * 1024 * 1024;
         if (request.ContentLength > requestLimit)
@@ -61,7 +61,19 @@ sealed class GitTransport(ForgeStore store, GitProcess git, RepositoryLocks lock
         if (protocol is "version=1" or "version=2")
             environment["HTTP_GIT_PROTOCOL"] = protocol;
 
-        await git.Execute(["http-backend"], environment, TimeSpan.FromMinutes(5), http.RequestAborted,
+        try
+        {
+            await Execute();
+        }
+        finally
+        {
+            if (!discovery && service == "git-receive-pack" && repo.PendingInitialization)
+                await repositories.CompleteInitialization(repo, CancellationToken.None);
+        }
+        if (!discovery && service == "git-receive-pack")
+            store.Audit("git.receive", repo.Id);
+
+        Task<bool> Execute() => git.Execute(["http-backend"], environment, TimeSpan.FromMinutes(5), http.RequestAborted,
             async (process, token) =>
             {
                 using var transfer = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -90,8 +102,6 @@ sealed class GitTransport(ForgeStore store, GitProcess git, RepositoryLocks lock
                     catch (OperationCanceledException) when (transfer.IsCancellationRequested) { }
                 }
             });
-        if (!discovery && service == "git-receive-pack")
-            store.Audit("git.receive", repo.Id);
     }
 
     private bool TryAuthenticate(HttpRequest request)

@@ -256,6 +256,8 @@ export interface components {
         CreateRepository: {
             name: string;
             defaultBranch?: null | string;
+            /** @default false */
+            initialize: boolean;
         };
         FileChange: {
             branch: string;
@@ -317,6 +319,7 @@ export interface components {
             defaultBranch: string;
             createdAt: string;
             clonePath: string;
+            isInitialized: boolean;
         };
         SessionInfo: {
             username: null | string;

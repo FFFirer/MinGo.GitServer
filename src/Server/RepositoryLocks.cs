@@ -3,6 +3,22 @@ sealed class RepositoryLocks
 {
     private readonly Dictionary<Guid, int> leases = new();
 
+    private readonly SemaphoreSlim[] initialization = Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1)).ToArray();
+
+    public async Task<IDisposable?> Initialize(Repository repo, CancellationToken token)
+    {
+        if (!repo.PendingInitialization)
+            return null;
+        var gate = initialization[(uint)repo.Id.GetHashCode() % initialization.Length];
+        await gate.WaitAsync(token);
+        return new InitializationLease(gate);
+    }
+
+    private sealed class InitializationLease(SemaphoreSlim gate) : IDisposable
+    {
+        public void Dispose() => gate.Release();
+    }
+
     public IDisposable Read(Guid id) => Acquire(id, exclusive: false);
     public IDisposable Delete(Guid id) => Acquire(id, exclusive: true);
 

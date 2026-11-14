@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 
-record Repository(Guid Id, string Name, string DefaultBranch, string CreatedAt);
+record Repository(Guid Id, string Name, string DefaultBranch, string CreatedAt, bool PendingInitialization);
 record GitToken(string Token, DateTimeOffset ExpiresAt);
 
 sealed partial class ForgeStore
@@ -44,7 +44,7 @@ sealed partial class ForgeStore
         using var db = Open();
         using var version = Command(db, "PRAGMA user_version");
         var schemaVersion = (long)version.ExecuteScalar()!;
-        if (schemaVersion > 1)
+        if (schemaVersion > 2)
             throw new InvalidOperationException("The database was created by a newer version.");
         if (schemaVersion == 0)
         {
@@ -59,6 +59,17 @@ sealed partial class ForgeStore
                 COMMIT;
                 """);
             schema.ExecuteNonQuery();
+        }
+
+        if (schemaVersion < 2)
+        {
+            using var migration = Command(db, """
+                BEGIN;
+                ALTER TABLE repos ADD COLUMN pending_initialization INTEGER NOT NULL DEFAULT 0;
+                PRAGMA user_version = 2;
+                COMMIT;
+                """);
+            migration.ExecuteNonQuery();
         }
 
         using var existing = Command(db, "SELECT username FROM admin WHERE id=1");
@@ -147,7 +158,7 @@ sealed partial class ForgeStore
     public List<Repository> List()
     {
         using var db = Open();
-        using var query = Command(db, "SELECT id,name,branch,created_at FROM repos WHERE deleted_at IS NULL ORDER BY name");
+        using var query = Command(db, "SELECT id,name,branch,created_at,pending_initialization FROM repos WHERE deleted_at IS NULL ORDER BY name");
         using var rows = query.ExecuteReader();
         var result = new List<Repository>();
         while (rows.Read())
@@ -161,7 +172,7 @@ sealed partial class ForgeStore
     private Repository? Find(string column, string value)
     {
         using var db = Open();
-        using var query = Command(db, $"SELECT id,name,branch,created_at FROM repos WHERE {column}=$value AND deleted_at IS NULL",
+        using var query = Command(db, $"SELECT id,name,branch,created_at,pending_initialization FROM repos WHERE {column}=$value AND deleted_at IS NULL",
             ("$value", value));
         using var rows = query.ExecuteReader();
         return rows.Read() ? Read(rows) : null;
@@ -171,12 +182,21 @@ sealed partial class ForgeStore
     {
         using var db = Open();
         using var tx = db.BeginTransaction();
-        using var insert = Command(db, "INSERT INTO repos VALUES($id,$name,$branch,$created,NULL)",
-            ("$id", repo.Id.ToString("D")), ("$name", repo.Name), ("$branch", repo.DefaultBranch), ("$created", repo.CreatedAt));
+        using var insert = Command(db, "INSERT INTO repos VALUES($id,$name,$branch,$created,NULL,$pending)",
+            ("$id", repo.Id.ToString("D")), ("$name", repo.Name), ("$branch", repo.DefaultBranch), ("$created", repo.CreatedAt), ("$pending", repo.PendingInitialization));
         insert.Transaction = tx;
         insert.ExecuteNonQuery();
         WriteAudit(db, tx, "repo.create", repo.Id);
         tx.Commit();
+    }
+
+    public void CompleteInitialization(Guid id, string branch)
+    {
+        using var db = Open();
+        using var update = Command(db,
+            "UPDATE repos SET branch=$branch,pending_initialization=0 WHERE id=$id AND pending_initialization=1",
+            ("$branch", branch), ("$id", id.ToString("D")));
+        update.ExecuteNonQuery();
     }
 
     public void Tombstone(Guid id)
@@ -229,7 +249,7 @@ sealed partial class ForgeStore
     }
 
     private static Repository Read(SqliteDataReader row) =>
-        new(Guid.Parse(row.GetString(0)), row.GetString(1), row.GetString(2), row.GetString(3));
+        new(Guid.Parse(row.GetString(0)), row.GetString(1), row.GetString(2), row.GetString(3), row.GetBoolean(4));
 
     public static string Now() => DateTimeOffset.UtcNow.ToString("O");
 

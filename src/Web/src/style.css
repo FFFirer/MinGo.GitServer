@@ -116,6 +116,8 @@ pre {
 .more { margin-top: .75rem; }
 .login { max-width: 26rem; margin: 3rem auto; padding: clamp(1rem, 5vw, 2rem); display: grid; gap: 1rem; }
 label { display: grid; gap: .35rem; color: var(--muted); }
+.checkbox { display: flex; flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: .5rem; }
+.checkbox input { width: 1rem; min-height: 1rem; margin: 0; accent-color: var(--ink); }
 input {
   width: 100%;
   min-height: 44px;

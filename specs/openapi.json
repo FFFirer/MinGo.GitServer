@@ -951,6 +951,10 @@
               "null",
               "string"
             ]
+          },
+          "initialize": {
+            "type": "boolean",
+            "default": false
           }
         }
       },
@@ -1182,7 +1186,8 @@
           "name",
           "defaultBranch",
           "createdAt",
-          "clonePath"
+          "clonePath",
+          "isInitialized"
         ],
         "type": "object",
         "properties": {
@@ -1201,6 +1206,9 @@
           },
           "clonePath": {
             "type": "string"
+          },
+          "isInitialized": {
+            "type": "boolean"
           }
         }
       },

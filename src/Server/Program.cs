@@ -102,6 +102,9 @@ if (builder.Configuration["Forge:TrustedProxy"] is not null)
 var store = app.Services.GetRequiredService<ForgeStore>();
 using var dataLock = store.LockDataDirectory();
 store.Initialize(builder.Configuration["Forge:AdminPassword"]);
+var gitRepository = app.Services.GetRequiredService<GitRepository>();
+foreach (var pending in store.List().Where(repository => repository.PendingInitialization))
+    await gitRepository.CompleteInitialization(pending, CancellationToken.None);
 var git = app.Services.GetRequiredService<GitProcess>();
 await git.Run(null, ["--version"], CancellationToken.None);
 app.Use(async (http, next) =>
@@ -178,14 +181,23 @@ admin.MapDelete("/session", async (HttpContext http) =>
 }).WithName("logout");
 admin.MapPost("/git-token", () => TypedResults.Ok(store.IssueToken())).WithName("issueGitToken");
 var repos = admin.MapGroup("/repos");
-repos.MapGet("", () => TypedResults.Ok(store.List().Select(Present).ToArray())).WithName("listRepositories");
+repos.MapGet("", async (CancellationToken token) =>
+{
+    var result = new List<RepositoryInfo>();
+    foreach (var repository in store.List())
+        result.Add(Present(repository.PendingInitialization
+            ? await gitRepository.GetMetadata(repository.Id, token)
+            : repository));
+    return TypedResults.Ok(result.ToArray());
+}).WithName("listRepositories");
 repos.MapPost("", async (CreateRepository request, GitRepository service, CancellationToken token) =>
 {
     var repository = await service.Create(request, token);
     return TypedResults.Created($"/api/v1/repos/{repository.Id}", Present(repository));
 }).WithName("createRepository");
 var repo = repos.MapGroup("/{id:guid}");
-repo.MapGet("", (Guid id, GitRepository service) => TypedResults.Ok(Present(service.Get(id)))).WithName("getRepository");
+repo.MapGet("", async (Guid id, GitRepository service, CancellationToken token) =>
+    TypedResults.Ok(Present(await service.GetMetadata(id, token)))).WithName("getRepository");
 repo.MapDelete("", (Guid id, GitRepository service) =>
 {
     service.Delete(id);
@@ -216,7 +228,7 @@ app.MapMethods("/git/{owner}/{name}.git/{**endpoint}", ["GET", "POST"],
 app.Run();
 
 RepositoryInfo Present(Repository repository) => new(repository.Id, repository.Name, repository.DefaultBranch,
-    repository.CreatedAt, $"/git/{store.Admin}/{repository.Name}.git");
+    repository.CreatedAt, $"/git/{store.Admin}/{repository.Name}.git", !repository.PendingInitialization);
 
 static void MapReferences(RouteGroupBuilder group, string route, string kind, string label)
 {
@@ -233,4 +245,4 @@ static void MapReferences(RouteGroupBuilder group, string route, string kind, st
 
 record SessionInfo(string? Username, string CsrfToken);
 record LoginRequest(string Username, string Password);
-record RepositoryInfo(Guid Id, string Name, string DefaultBranch, string CreatedAt, string ClonePath);
+record RepositoryInfo(Guid Id, string Name, string DefaultBranch, string CreatedAt, string ClonePath, bool IsInitialized);

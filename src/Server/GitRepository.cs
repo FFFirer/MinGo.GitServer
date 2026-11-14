@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
-record CreateRepository(string Name, string? DefaultBranch = null);
+record CreateRepository(string Name, string? DefaultBranch = null, bool Initialize = false);
 record CreateReference(string Name, string Sha);
 record GitReference(string Name, string Sha);
 record GitCommit(string Sha, string Parents, string Author, string Email, string AuthoredAt, string Message);
@@ -26,7 +26,7 @@ sealed partial class GitRepository(ForgeStore store, GitProcess git, RepositoryL
         if (!ForgeStore.ValidSlug(request.Name))
             throw new ForgeException(422, "Use 1–63 lowercase letters, digits, underscores or hyphens for the repository name.");
         await ValidateRef("heads", branch, token);
-        var repo = new Repository(Guid.NewGuid(), request.Name, branch, ForgeStore.Now());
+        var repo = new Repository(Guid.NewGuid(), request.Name, branch, ForgeStore.Now(), !request.Initialize);
         var path = store.RepositoryPath(repo.Id);
         try
         {
@@ -34,6 +34,8 @@ sealed partial class GitRepository(ForgeStore store, GitProcess git, RepositoryL
             await Run(repo, ["config", "receive.denyDeleteCurrent", "true"], token);
             await Run(repo, ["config", "receive.maxInputSize", "268435456"], token);
             await Run(repo, ["config", "receive.fsckObjects", "true"], token);
+            if (request.Initialize)
+                await EditCore(repo, new(branch, "README.md", null, $"# {repo.Name}\n", "Initial commit"), false, token);
             store.Insert(repo);
         }
         catch (Microsoft.Data.Sqlite.SqliteException error) when (error.SqliteExtendedErrorCode == 2067)
@@ -49,6 +51,25 @@ sealed partial class GitRepository(ForgeStore store, GitProcess git, RepositoryL
         return repo;
     }
 
+    public async Task<Repository> CompleteInitialization(Repository repo, CancellationToken token)
+    {
+        if (!repo.PendingInitialization)
+            return repo;
+
+        var output = await Run(repo, ["for-each-ref", "--sort=refname", "--format=%(refname:lstrip=2)", "refs/heads/"], token);
+        var branches = GitProcess.Decode(output).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        if (branches.Length == 0)
+            return repo;
+
+        var head = GitProcess.Decode(await Run(repo, ["symbolic-ref", "HEAD"], token)).TrimEnd('\r', '\n');
+        var preferred = head["refs/heads/".Length..];
+        var branch = branches.Contains(preferred, StringComparer.Ordinal) ? preferred : branches.Min(StringComparer.Ordinal)!;
+        if (preferred != branch)
+            await Run(repo, ["symbolic-ref", "HEAD", $"refs/heads/{branch}"], token);
+        store.CompleteInitialization(repo.Id, branch);
+        return repo with { DefaultBranch = branch, PendingInitialization = false };
+    }
+
     public void Delete(Guid id)
     {
         using var lease = locks.Delete(id);
@@ -58,6 +79,13 @@ sealed partial class GitRepository(ForgeStore store, GitProcess git, RepositoryL
     }
 
     public Repository Get(Guid id) => store.Find(id) ?? throw new ForgeException(404, "Repository does not exist.");
+
+    public async Task<Repository> GetMetadata(Guid id, CancellationToken token)
+    {
+        using var lease = locks.Read(id);
+        using var initialization = await locks.Initialize(Get(id), token);
+        return await CompleteInitialization(Get(id), token);
+    }
 
     public async Task<GitReference[]> References(Guid id, string kind, CancellationToken token)
     {
@@ -70,7 +98,8 @@ sealed partial class GitRepository(ForgeStore store, GitProcess git, RepositoryL
     public async Task<GitReference> AddReference(Guid id, string kind, CreateReference request, CancellationToken token)
     {
         using var lease = locks.Read(id);
-        var repo = Get(id);
+        using var initialization = await locks.Initialize(Get(id), token);
+        var repo = await CompleteInitialization(Get(id), token);
         var reference = await ValidateRef(kind, request.Name, token);
         var sha = await Resolve(repo, RequireSha(request.Sha), token)
             ?? throw new ForgeException(404, "Commit does not exist.");
@@ -79,6 +108,8 @@ sealed partial class GitRepository(ForgeStore store, GitProcess git, RepositoryL
         {
             throw new ForgeException(409, "Reference already exists or conflicts with another reference.");
         }
+        if (kind == "heads")
+            await CompleteInitialization(repo, CancellationToken.None);
         store.Audit($"ref.{kind}.create", id);
         return new(request.Name, sha);
     }
@@ -86,7 +117,8 @@ sealed partial class GitRepository(ForgeStore store, GitProcess git, RepositoryL
     public async Task RemoveReference(Guid id, string kind, string name, CancellationToken token)
     {
         using var lease = locks.Read(id);
-        var repo = Get(id);
+        using var initialization = await locks.Initialize(Get(id), token);
+        var repo = await CompleteInitialization(Get(id), token);
         var reference = await ValidateRef(kind, name, token);
         if (kind == "heads" && name == repo.DefaultBranch)
             throw new ForgeException(409, "The default branch cannot be deleted.");
@@ -183,7 +215,16 @@ sealed partial class GitRepository(ForgeStore store, GitProcess git, RepositoryL
     public async Task<FileCommit> Edit(Guid id, FileChange request, bool delete, CancellationToken token)
     {
         using var lease = locks.Read(id);
-        var repo = Get(id);
+        using var initialization = await locks.Initialize(Get(id), token);
+        var repo = await CompleteInitialization(Get(id), token);
+        var commit = await EditCore(repo, request, delete, token);
+        await CompleteInitialization(repo, CancellationToken.None);
+        store.Audit(delete ? "file.delete" : "file.write", id);
+        return commit;
+    }
+
+    private async Task<FileCommit> EditCore(Repository repo, FileChange request, bool delete, CancellationToken token)
+    {
         var reference = await ValidateRef("heads", request.Branch, token);
         var path = RequirePath(request.Path);
         if (string.IsNullOrWhiteSpace(request.Message) || request.Message.Length > 4096 || request.Message.Contains('\0'))
@@ -243,7 +284,6 @@ sealed partial class GitRepository(ForgeStore store, GitProcess git, RepositoryL
                     throw new ForgeException(409, "Branch HEAD changed. Refresh before committing.");
                 throw new ForgeException(409, "Branch could not be updated. Retry after refreshing.");
             }
-            store.Audit(delete ? "file.delete" : "file.write", id);
             return new(sha);
         }
         finally
